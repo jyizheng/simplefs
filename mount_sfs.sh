@@ -1,13 +1,16 @@
 #!/bin/sh
 
 
-rm image
+make clean
+make
 
-dd bs=4096 count=100 if=/dev/zero of=image
-./mkfs-sfs image
+sudo ./mkfs-sfs /dev/sda1
+
+sync;
+sync;
 
 sudo umount tmp
 sudo rmmod simplefs
 sudo insmod simplefs.ko
-sudo mount -o loop -t sfs image `pwd`/tmp
+sudo mount -o loop -t sfs /dev/sda1 `pwd`/tmp
 

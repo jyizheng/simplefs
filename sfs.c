@@ -40,6 +40,9 @@ struct sfs_inode *sfs_inode_search(struct super_block *sb,
 			struct sfs_inode *search)
 {
 	uint64_t count = 0;
+
+	printk("inodes_count=%d\n", SFS_SB(sb)->inodes_count);
+
 	while (start->inode_no != search->inode_no
 			&& count < SFS_SB(sb)->inodes_count) {
 		count++;
@@ -126,22 +129,6 @@ end:
 	return ret;
 }
 
-static int sfs_sb_get_objects_count(struct super_block *vsb, uint64_t *out)
-{
-	struct sfs_super_block *sb = SFS_SB(vsb);
-
-	if (mutex_lock_interruptible(&sfs_inodes_mgmt_lock)) {
-		sfs_trace("Failed to acquire mutex lock\n");
-		return -EINTR;
-	}
-	
-	*out = sb->inodes_count;
-	mutex_unlock(&sfs_inodes_mgmt_lock);
-
-	return 0;
-
-}
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
 static int sfs_iterate(struct file *filp, struct dir_context *ctx)
 #else
@@ -166,6 +153,9 @@ static int sfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	inode = filp->f_dentry->d_inode;
 	sb = inode->i_sb;
 
+	printk("%s is called\n", __func__); 	
+	printk("pos=%lld\n", pos); 	
+
 	if (pos) {
 		/* FIXME: use a hack of reading pos to figure if we have filled
 		 *  in all data.
@@ -181,8 +171,20 @@ static int sfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 			filp->f_dentry->d_name.name);
 		return -ENOTDIR;
 	}
-	
+
+	if (inode->i_ino != 1) {
+		printk(KERN_INFO "i_ino does not match\n");
+
+	}
+
+	if (sfs_inode->start_block_number != 2 + 64*256*1024L) {
+		printk(KERN_INFO "start block number not match\n");
+	}
+	 
 	bh = sb_bread(sb, sfs_inode->start_block_number);
+
+	printk(KERN_INFO "bh=%p\n", bh);
+
 	BUG_ON(!bh);
 
 	entry = (struct sfs_dir_entry *)bh->b_data;
@@ -253,17 +255,19 @@ ssize_t sfs_read(struct file *filp, char __user *buf, size_t len,
 	char *buffer;
 	int nbytes;
 	
-	printk("inode->file_size=%lu\n", inode->file_size);
-	printk("inode->start_block_number=%lu\n", inode->start_block_number);
-	printk("len=%lu\n", len);
-	printk("*ppos=%lu\n", *ppos);
+	
+	printk("======== sfs_read start =======\n");
+	printk("inode->file_size=%llu\n", inode->file_size);
+	printk("inode->start_block_number=%llu\n", inode->start_block_number);
+	printk("buf len=%zu\n", len);
+	printk("*ppos=%llu\n", *ppos);
 
 	if (*ppos >= inode->file_size) {
 		return 0;
 	}
-		
+	
 	bh = sb_bread(filp->f_path.dentry->d_inode->i_sb,
-		      inode->start_block_number);
+				inode->start_block_number);
 	if (!bh) {
 		printk(KERN_ERR "Reading the block number [%llu] failed.\n",
 			inode->start_block_number);
@@ -271,7 +275,10 @@ ssize_t sfs_read(struct file *filp, char __user *buf, size_t len,
 	}
 
 	buffer = (char *)bh->b_data;
+	printk("b_size=%d\n", bh->b_size);
+
 	nbytes = min((size_t) inode->file_size, len);
+	nbytes = min(nbytes, 4096);
 
 	if (copy_to_user(buf, buffer, nbytes)) {
 		brelse(bh);
@@ -279,11 +286,10 @@ ssize_t sfs_read(struct file *filp, char __user *buf, size_t len,
 		return -EFAULT;
 	}
 
-	buffer[59] = '\0';
-	printk("buffer:%s\n", buffer);
-
 	brelse(bh);
 	*ppos += nbytes;
+
+	printk("======== sfs_read end =======\n");
 	return nbytes;
 }
 
@@ -315,7 +321,8 @@ int sfs_inode_save(struct super_block *sb, struct sfs_inode *sfs_inode)
 		return -EIO;
 	}
 	brelse(bh);
-	mutex_lock(&sfs_sb_lock);
+
+	mutex_unlock(&sfs_sb_lock);
 
 	return 0;
 }
@@ -328,30 +335,40 @@ ssize_t sfs_write(struct file *filp, const char __user *buf, size_t len,
 	struct buffer_head *bh;
 	struct super_block *sb;
 	struct sfs_super_block *sfs_sb;
-	handle_t *handle;
 
+#if 0
+	handle_t *handle;
+#endif
 	char *buffer;
 	int retval;
+	size_t nbytes;	
 
+
+	inode = filp->f_path.dentry->d_inode;
 	sb = filp->f_path.dentry->d_inode->i_sb;
 	sfs_sb = SFS_SB(sb);
 
+#if 0	
 	handle = jbd2_journal_start(sfs_sb->journal, 1);
 	if (IS_ERR(handle)) {
 		printk(KERN_ERR "jdb2_journal_start failed\n");
 		return PTR_ERR(handle);
 	}
+#endif
+
+	printk("======= I am in sfs_write =========\n");
+	printk("inode->i_size=%llu\n", inode->i_size);
+	printk("len=%zu\n", len);
+	printk("*ppos=%llu\n", *ppos);
 
 	retval = generic_write_checks(filp, ppos, &len, 0);
 	if (retval)
 		return retval;
 
-	inode = filp->f_path.dentry->d_inode;
 	sfs_inode = SFS_INODE(inode);
 
 	bh = sb_bread(filp->f_path.dentry->d_inode->i_sb,
 			sfs_inode->start_block_number);
-
 
 	if (!bh) {
 		printk(KERN_ERR "Reading the block number [%llu] failed.",
@@ -360,22 +377,31 @@ ssize_t sfs_write(struct file *filp, const char __user *buf, size_t len,
 	}
 
 	buffer = (char *)bh->b_data;
+	printk("b_size=%zu\n", bh->b_size);
+
+	//print_hex_dump(KERN_ALERT, "sfs_before_copy: ", DUMP_PREFIX_ADDRESS,
+        //        16, 1, (char *)bh->b_data, 100, 1);
+
 	buffer += *ppos;
-	
+#if 0
 	retval = jbd2_journal_get_write_access(handle, bh);
 	if (WARN_ON(retval)) {
 		brelse(bh);
 		sfs_trace("Cannot get write access for bh\n");
 		return retval;
 	}
+#endif
+	
 
-	if (copy_from_user(buffer, buf, len)) {
+	nbytes = min(len, 4096);
+	if (copy_from_user(buffer, buf, nbytes)) {
 		brelse(bh);
 		printk(KERN_ERR "Error coping data from userspace buffer\n");
 		return -EFAULT;
 	}
-	*ppos += len;
+	*ppos += nbytes;
 
+#if 0
 	retval = jbd2_journal_dirty_metadata(handle, bh);
 	if (WARN_ON(retval)) {
 		brelse(bh);
@@ -387,22 +413,24 @@ ssize_t sfs_write(struct file *filp, const char __user *buf, size_t len,
 	if (WARN_ON(retval)) {
 		brelse(bh);
 		return retval;
-	}	
+	}
+#endif
+	//print_hex_dump(KERN_ALERT, "sfs_aft_copy: ", DUMP_PREFIX_ADDRESS,
+        //        16, 1, (char *)bh->b_data, 100, 1);
 
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);	
-
-	if (mutex_lock_interruptible(&sfs_inodes_mgmt_lock)) {
-		sfs_trace("Failed to acquire mutex lock\n");
-		return -EINTR;
-	}
 
 	sfs_inode->file_size = *ppos;
 	retval = sfs_inode_save(sb, sfs_inode);
 	if (retval) {
 		len = retval;
 	}
+
+	inode->i_size = *ppos;
+	printk("===== sfs_inode->file_size=%lu =====\n", sfs_inode->file_size);
+	printk("===== inode->i_size=%zu =====\n", inode->i_size);
 
 	mutex_unlock(&sfs_inodes_mgmt_lock);
 	return len;
@@ -441,10 +469,13 @@ static sector_t sfs_bmap(struct address_space *mapping, sector_t block)
 {
 	struct sfs_inode *sfs_inode;
 
+
 	printk(KERN_ERR "simplefs_bmap is called\n");
 	sfs_inode = SFS_INODE(mapping->host);
 
-	printk("iblock=%lu, start_block_number=%lu\n",
+	BUG_ON(block > sfs_inode->block_count);
+
+	printk("iblock=%lu, start_block_number=%llu\n",
 		block, sfs_inode->start_block_number);
 
 	return sfs_inode->start_block_number + block;
@@ -471,117 +502,6 @@ static struct inode_operations sfs_inode_ops = {
 	.mkdir = sfs_mkdir,
 
 };
-
-static int sfs_create_fs_object(struct inode *dir, struct dentry *dentry,
-				umode_t mode)
-{
-	struct inode *inode;
-	struct sfs_inode *sfs_inode;
-	struct super_block *sb;
-	struct sfs_inode *parent_dir_inode;
-	struct buffer_head *bh;
-	struct sfs_dir_entry *dir_contents_datablock;
-	uint64_t count;
-	int ret;
-
-	if (mutex_lock_interruptible(&sfs_dir_children_update_lock)) {
-		sfs_trace("Failed to acquire mutex lock\n");
-		return -EINTR;
-	}
-	sb = dir->i_sb;
-	
-	ret = sfs_sb_get_objects_count(sb, &count);
-	if (ret < 0) {
-		mutex_lock(&sfs_dir_children_update_lock);
-		return ret;
-	}
-
-	if (unlikely(count >= SFS_MAX_FS_OBJ_SUPPORTED)) {
-		printk(KERN_ERR "Max number of objects supported reached\n");
-		return -EINVAL;
-	}
-	
-	inode = new_inode(sb);
-	if (!inode) {
-		mutex_unlock(&sfs_dir_children_update_lock);
-		return -ENOMEM;
-	}
-
-	inode->i_sb = sb;
-	inode->i_op = &sfs_inode_ops;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-	inode->i_ino = (count + SFS_START_INO - SFS_RESERVED_INODES + 1);
-
-	sfs_inode = kmem_cache_alloc(sfs_inode_cachep, GFP_KERNEL);
-	sfs_inode->inode_no = inode->i_ino;
-	inode->i_private = sfs_inode;
-	sfs_inode->mode = mode;
-
-	if (S_ISDIR(mode)) {
-		printk(KERN_INFO "New dir creation request\n");
-		sfs_inode->dir_children_count = 0;
-		inode->i_fop = &sfs_dir_operations;	
-	} else if (S_ISREG(mode)) {
-		printk(KERN_INFO "New file creation request\n");
-		sfs_inode->file_size = 0;
-		inode->i_fop = &sfs_file_operations;
-	}
-
-	/* First get a free block and update the free map, then add inode
-	 * to the inode table and update the sb inodes_count. Then update
-	 * the parent dir's inode with the new child.
-	 *
-	 * The above ordering helps us to maintain fs consistency even in most
-	 * crashes
- 	 */
-	ret = sfs_sb_get_one_block(sb, &sfs_inode->start_block_number);
-	if (ret < 0) {
-		printk(KERN_ERR "SFS could not get a freeblock\n");
-		mutex_unlock(&sfs_dir_children_update_lock);
-		return ret;	
-	}
-
-	sfs_inode_add(sb, sfs_inode);
-
-	parent_dir_inode = SFS_INODE(dir);
-	bh = sb_bread(sb, parent_dir_inode->start_block_number);
-	BUG_ON(!bh);
-	
-	dir_contents_datablock = (struct sfs_dir_entry *)bh->b_data;
-
-	/* Navigate to the last entry in the dir contents */
-	dir_contents_datablock += parent_dir_inode->dir_children_count;
-
-	dir_contents_datablock->inode_no = sfs_inode->inode_no;
-	strcpy(dir_contents_datablock->filename, dentry->d_name.name);
-
-	mark_buffer_dirty(bh);
-	sync_dirty_buffer(bh);
-	brelse(bh);
-
-	if (mutex_lock_interruptible(&sfs_inodes_mgmt_lock)) {
-		mutex_unlock(&sfs_dir_children_update_lock);
-		sfs_trace("Failed to acquire mutex lock\n");
-		return -EINTR;
-	}
-
-	parent_dir_inode->dir_children_count++;
-	ret = sfs_inode_save(sb, parent_dir_inode);
-	if (ret) {
-		mutex_unlock(&sfs_inodes_mgmt_lock);
-		mutex_unlock(&sfs_dir_children_update_lock);
-
-		return ret;
-	}
-
-	mutex_unlock(&sfs_inodes_mgmt_lock);
-	mutex_unlock(&sfs_dir_children_update_lock);
-
-	inode_init_owner(inode, dir, mode);
-	d_add(dentry, inode);
-
-	return 0;
-}
 
 static int sfs_mkdir(struct inode *dir, struct dentry *dentry,
 		     umode_t mode)
@@ -612,15 +532,18 @@ static struct inode *sfs_iget(struct super_block *sb, int ino)
 	inode->i_op = &sfs_inode_ops;
 	inode->i_mapping->a_ops = &sfs_aops;
 
-	if (S_ISDIR(sfs_inode->mode))
+	if (S_ISDIR(sfs_inode->mode)) {
+		inode->i_size = sfs_inode->dir_children_count *
+				sizeof(sfs_inode);
 		inode->i_fop = &sfs_dir_operations;
-	else if (S_ISREG(sfs_inode->mode) || ino == SFS_JOURNAL_INODE_NUMBER)
+	} else if (S_ISREG(sfs_inode->mode) || ino == SFS_JOURNAL_INODE_NUMBER) {
+		inode->i_size = sfs_inode->file_size;
 		inode->i_fop = &sfs_file_operations;
-	else
+	} else {
 		printk(KERN_ERR "Unknown inode type\n");
+	}
 
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-	
 	inode->i_private = sfs_inode;
 
 	return inode;
@@ -686,38 +609,6 @@ static const struct super_operations sfs_sops = {
 	.put_super = sfs_put_super,
 };
 
-static int sfs_load_journal(struct super_block *sb, int devnum)
-{
-	struct journal_s *journal;
-	char b[BDEVNAME_SIZE];
-	dev_t dev;
-	struct block_device *bdev;
-	int hblock, blocksize, len;
-	struct sfs_super_block *sfs_sb = SFS_SB(sb);
-	
-	dev = new_decode_dev(devnum);	
-	printk(KERN_INFO "Journal device is: %s\n", __bdevname(dev, b));
-	
-	bdev = blkdev_get_by_dev(dev, FMODE_READ|FMODE_WRITE|FMODE_EXCL, sb);
-	if (IS_ERR(bdev))
-		return 1;
-
-	blocksize = sb->s_blocksize;
-	hblock = bdev_logical_block_size(bdev);
-	len = SFS_MAX_FS_OBJ_SUPPORTED;
-
-	journal = jbd2_journal_init_dev(bdev, sb->s_bdev, 1, -1, blocksize);
-	if (!journal) {
-		printk(KERN_ERR "Cannot load journal\n");
-		return 1;
-	}
-	
-	journal->j_private = sb;
-	sfs_sb->journal = journal;
-
-	return 0;
-}
-
 static int sfs_sb_load_journal(struct super_block *sb, struct inode *inode)
 {
 	struct journal_s *journal;
@@ -732,71 +623,6 @@ static int sfs_sb_load_journal(struct super_block *sb, struct inode *inode)
 	journal->j_private = sb;
 	sfs_sb->journal = journal;
 
-	return 0;
-}
-
-#define SFS_OPT_JOURNAL_DEV 1
-#define SFS_OPT_JOURNAL_PATH 2
-
-static const match_table_t tokens = {
-	{SFS_OPT_JOURNAL_DEV, "journal_dev=%u"},
-	{SFS_OPT_JOURNAL_PATH, "journal_path=%s"},
-};
-
-static int sfs_parse_option(struct super_block *sb, char *options)
-{
-	substring_t args[MAX_OPT_ARGS];
-	int token, ret, arg;
-	char *p;
-
-	printk(KERN_INFO "sfs_parse_option is called\n");
-	while ((p = strsep(&options, ",")) != NULL) {
-		if (!*p)
-			continue;
-		
-		args[0].to = args[0].from = NULL;
-		token = match_token(p, tokens, args);
-
-		switch (token) {
-			case SFS_OPT_JOURNAL_DEV:
-				if (args->from && match_int(args, &arg))
-					return 1;
-				printk(KERN_INFO
-					"Load journal devnum:%i\n",arg);
-
-				if ((ret = sfs_load_journal(sb, arg)))
-					return ret;
-				break;
-			case SFS_OPT_JOURNAL_PATH:
-			{
-				char *journal_path;
-				struct inode *journal_inode;
-				struct path path;
-
-				BUG_ON(!(journal_path = match_strdup(&args[0])));
-				ret = kern_path(journal_path, LOOKUP_FOLLOW, &path);
-				if (ret) {
-					printk(KERN_ERR "Not find journal device: error %d\n", ret);
-					kfree(journal_path);
-				}
-
-				journal_inode = path.dentry->d_inode;
-				path_put(&path);
-				kfree(journal_path);
-
-				if (S_ISBLK(journal_inode->i_mode)) {
-					unsigned long journal_devnum = new_encode_dev(journal_inode->i_rdev);
-					if ((ret = sfs_load_journal(sb, journal_devnum)))
-						return ret;
-				} else {
-					if ((ret = sfs_sb_load_journal(sb, journal_inode)))
-						return ret;
-				}
-
-				break;
-			}
-		}
-	}	
 	return 0;
 }
 
@@ -827,15 +653,18 @@ int sfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	sb_disk->journal = NULL;
 	
-	printk(KERN_INFO "SFS of version [%llu] formatted with a block size of "
-			 "[%llu] detected in the device.\n",
+	printk(KERN_INFO "SFS of version [%llu] formatted with a "
+			 "block size of [%llu] detected in the device.\n",
 			  sb_disk->version, sb_disk->block_size);
 
 	sb->s_magic = SFS_MAGIC;
 	sb->s_fs_info = sb_disk;
-	sb->s_maxbytes = SFS_DEFAULT_BLOCK_SIZE;
-	sb->s_op = &sfs_sops;
 
+	sb->s_maxbytes = SFS_DEFAULT_MAX_BYTES;
+	sb->s_blocksize_bits = SFS_DEFAULT_BLOCK_BITS;
+	sb->s_blocksize = sb_disk->block_size;
+	sb->s_op = &sfs_sops;
+	
 	root_inode = new_inode(sb);
 	root_inode->i_ino = SFS_ROOTDIR_INODE_NUMBER;
 	inode_init_owner(root_inode, NULL, S_IFDIR);
@@ -858,17 +687,23 @@ int sfs_fill_super(struct super_block *sb, void *data, int silent)
 		goto release;
 	}
 
-	if ((ret = sfs_parse_option(sb, data)))
-		goto release;
-
+	
 	if (!(sb_disk->journal)) {
 		struct inode *journal_inode;
 		journal_inode = sfs_iget(sb, SFS_JOURNAL_INODE_NUMBER);
 		ret = sfs_sb_load_journal(sb, journal_inode);
-		goto release;
 	}
-	ret = jbd2_journal_load(sb_disk->journal);
 
+	#if 0
+	/* FIXME: disable this first */
+	if (sb_disk->journal) {
+		ret = jbd2_journal_load(sb_disk->journal);
+	}
+
+	printk("j_maxlen=%u\n", sb_disk->journal->j_maxlen);
+	printk("j_max_transaction_buffers=%u\n",
+				sb_disk->journal->j_max_transaction_buffers);
+	#endif
 release:
 	brelse(bh);
 	return ret;

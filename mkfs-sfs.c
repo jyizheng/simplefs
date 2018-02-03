@@ -6,12 +6,13 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <inttypes.h>
 
 #include "sfs.h"
 
 #define WELCOMEFILE_DATABLOCK_NUMBER (SFS_LAST_RESERVED_BLOCK + 1)
 #define WELCOMEFILE_INODE_NUMBER (SFS_LAST_RESERVED_INODE + 1)
-#define WELCOMEFILE_BLOCK_COUNT 100
+#define WELCOMEFILE_BLOCK_COUNT 50
 
 static int write_superblock(int fd)
 {
@@ -48,6 +49,7 @@ static int write_root_inode(int fd)
 	root_inode.inode_no = SFS_ROOTDIR_INODE_NUMBER;
 	root_inode.start_block_number = SFS_ROOTDIR_DATABLOCK_NUMBER;
 	root_inode.dir_children_count = 1;
+	root_inode.block_count = 1;
 
 	ret = write(fd, &root_inode, sizeof(root_inode));
 
@@ -69,7 +71,6 @@ static int write_journal_inode(int fd)
 	journal.inode_no = SFS_JOURNAL_INODE_NUMBER;
 	journal.start_block_number = SFS_JOURNAL_BLOCK_NUMBER;
 	journal.block_count = SFS_JOURNAL_BLOCK_COUNT;
-
 	
 	ret = write(fd, &journal, sizeof(journal));
 
@@ -109,10 +110,20 @@ static int write_welcome_inode(int fd, const struct sfs_inode *i)
 int write_journal(int fd)
 {
 	ssize_t ret;
-	ret = lseek(fd, SFS_DEFAULT_BLOCK_SIZE * SFS_JOURNAL_BLOCK, SEEK_CUR);
+	off_t offset;
+
+	ret = lseek(fd, SFS_DEFAULT_BLOCK_SIZE * SFS_JOURNAL_BLOCK_COUNT, SEEK_CUR);
 	if (ret == (off_t) -1) {
 		printf("Cannot write journal\n");
 		return -1;
+	}
+	
+	//printf("ret=%"PRIu64"\n", ret);
+
+	offset = lseek( fd, 0, SEEK_CUR ) ;
+
+	if ((offset>>12) != 64*256*1024L + 2) {
+		printf("offset=%ld\n", offset);
 	}
 
 	printf("Journal written successfully\n");
@@ -123,6 +134,12 @@ int write_dirent(int fd, const struct sfs_dir_entry *entry)
 {
 	ssize_t nbytes = sizeof(*entry);
 	ssize_t ret;
+
+	off_t offset = lseek(fd, 0, SEEK_CUR ) ;
+
+	if ((offset>>12) != 64*256*1024L + 2) {
+		printf("offset=%ld\n", offset);
+	}
 
 	ret = write(fd, entry, nbytes);
 	if (ret != nbytes) {
@@ -147,6 +164,13 @@ int write_dirent(int fd, const struct sfs_dir_entry *entry)
 int write_block(int fd, char *block, size_t len)
 {
 	ssize_t ret;
+	off_t offset = lseek( fd, 0, SEEK_CUR ) ;
+
+	printf("offset blk=%ld\n", offset>>12);
+
+	if ((offset>>12) != 64*256*1024L + 3) {
+		printf("offset=%ld\n", offset);
+	}
 
 	ret = write(fd, block, len);
 	if (ret != len) {
@@ -154,8 +178,15 @@ int write_block(int fd, char *block, size_t len)
 		return -1;
 	}
 	printf("Block has been written successfully\n");
+
+
+	offset = lseek(fd, -len, SEEK_CUR) ;
+	memset(block, '\0', len);
+	ret = read(fd, block, len);
+
+	printf("read block: %s\n", block); 	
+
 	return 0;
-	
 }
 
 int main(int argc, char *argv[])
@@ -163,7 +194,7 @@ int main(int argc, char *argv[])
 	int fd;
 	ssize_t ret;
 
-	char welcomefile_body[] = "From the beginning, God created "
+	char welcomefile_body[] = "1:1 From the beginning, God created "
                                   "the heavens and the earth!\n";
 	struct sfs_inode welcome = {
 		.mode = S_IFREG,

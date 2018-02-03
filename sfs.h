@@ -2,6 +2,9 @@
 #define SFS_JOURNAL_MAGIC 0x01302018
 
 #define SFS_DEFAULT_BLOCK_SIZE 4096
+#define SFS_DEFAULT_BLOCK_BITS 12
+
+#define SFS_DEFAULT_MAX_BYTES (512*1024*1024*1024L)
 #define SFS_FILENAME_MAXLEN 255
 #define SFS_START_INO 10
 
@@ -27,24 +30,26 @@
 #endif
 
 /* Hard-coded inode number for the root dir */
-const int SFS_ROOTDIR_INODE_NUMBER = 1;
+const uint64_t SFS_ROOTDIR_INODE_NUMBER = 1;
 
 /* The disk block for the super block */
-const int SFS_SUPERBLOCK_BLOCK_NUMBER = 0;
+const uint64_t SFS_SUPERBLOCK_BLOCK_NUMBER = 0;
 
 /* The disk block for the inode table */
-const int SFS_INODETABLE_BLOCK_NUMBER = 1;
+const uint64_t SFS_INODETABLE_BLOCK_NUMBER = 1;
 
 /** Journal Setting */
-const int SFS_JOURNAL_INODE_NUMBER = 2;
-const int SFS_JOURNAL_BLOCK_NUMBER = 2;
-const int SFS_JOURNAL_BLOCK_COUNT= 128 * 256 * 1024;
-
+const uint64_t SFS_JOURNAL_INODE_NUMBER = 2;
+const uint64_t SFS_JOURNAL_BLOCK_NUMBER = 2;
+const uint64_t SFS_JOURNAL_BLOCK_COUNT= 64 * 256 * 1024;
 
 /* The disk block where the dir entry of root directory */
-const int SFS_ROOTDIR_DATABLOCK_NUMBER = 4;
+#define SFS_ROOTDIR_DATABLOCK_NUMBER (SFS_JOURNAL_BLOCK_COUNT + 2)
 
+/* The Start Point of Unreserved Blocks */
 #define SFS_LAST_RESERVED_BLOCK SFS_ROOTDIR_DATABLOCK_NUMBER
+
+/* The Start Point of Unreserved Inodes */
 #define SFS_LAST_RESERVED_INODE SFS_JOURNAL_INODE_NUMBER
 
 /* The dir entry struct */
@@ -66,8 +71,7 @@ struct sfs_inode {
 };
 
 /* FIXME: Maybe not needed */
-const int SFS_MAX_FS_OBJ_SUPPORTED = 64;
-
+const uint64_t SFS_MAX_FS_OBJ_SUPPORTED = 64;
 
 struct journal_s;
 
