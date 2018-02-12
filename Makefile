@@ -1,5 +1,5 @@
 obj-m := simplefs.o
-simplefs-objs := sfs.o
+simplefs-objs := sfs.o sfs_in_kernel_write.o sfs_buffer.o
 ccflag-y := -DSFS_DEBUG
 
 all: ko mkfs-sfs

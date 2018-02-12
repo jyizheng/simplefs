@@ -1,3 +1,4 @@
+
 #define SFS_MAGIC 0x20180130
 #define SFS_JOURNAL_MAGIC 0x01302018
 
@@ -73,6 +74,7 @@ struct sfs_inode {
 /* FIXME: Maybe not needed */
 const uint64_t SFS_MAX_FS_OBJ_SUPPORTED = 64;
 
+
 struct journal_s;
 
 /* super block definiation */
@@ -83,7 +85,21 @@ struct sfs_super_block {
 
 	uint64_t inodes_count;
 	uint64_t free_blocks;
-
 	struct journal_s *journal;
+
 	char padding[4048];
 };
+
+#ifdef __KERNEL__
+
+#include <linux/aio.h>
+#include <linux/pagevec.h>
+ssize_t sfs_in_kernel_write(struct kiocb *iocb, const struct iovec *iov,
+			    unsigned long nr_segs, loff_t pos);
+
+int sfs_generic_write_end(struct file *file, struct address_space *mapping,
+			loff_t pos, unsigned len, unsigned copied,
+			struct page *page, void *fsdata);
+
+
+#endif
