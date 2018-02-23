@@ -47,8 +47,6 @@ struct sfs_inode *sfs_inode_search(struct super_block *sb,
 {
 	uint64_t count = 0;
 
-	printk("inodes_count=%d\n", SFS_SB(sb)->inodes_count);
-
 	while (start->inode_no != search->inode_no
 			&& count < SFS_SB(sb)->inodes_count) {
 		count++;
@@ -112,9 +110,6 @@ static int sfs_iterate(struct file *filp, struct dir_context *ctx)
 	inode = filp->f_dentry->d_inode;
 	sb = inode->i_sb;
 
-	printk("%s is called\n", __func__); 	
-	printk("pos=%lld\n", pos); 	
-
 	if (pos) {
 		/* FIXME: use a hack of reading pos to figure if we have filled
 		 *  in all data.
@@ -130,19 +125,12 @@ static int sfs_iterate(struct file *filp, struct dir_context *ctx)
 			filp->f_dentry->d_name.name);
 		return -ENOTDIR;
 	}
-
-	printk(KERN_INFO "i_ino=%d\n", inode->i_ino);
-	printk(KERN_INFO "start block number is %llu\n", sfs_inode->start_block_number);
 	 
 	bh = sb_bread(sb, sfs_inode->start_block_number);
-
-	printk(KERN_INFO "bh=%p\n", bh);
-
 	BUG_ON(!bh);
 
 	entry = (struct sfs_dir_entry *)bh->b_data;
 	for (i = 0; i < sfs_inode->dir_children_count; i++) {
-		printk(KERN_INFO "entry->filename=%s\n", entry->filename);
 		dir_emit(ctx, entry->filename, SFS_FILENAME_MAXLEN,
 			entry->inode_no, DT_UNKNOWN);
 		ctx->pos += sizeof(struct sfs_dir_entry);
@@ -204,9 +192,6 @@ static void sfs_write_failed(struct address_space *mapping, loff_t to)
 {
 	struct inode *inode = mapping->host;
 
-	sfs_trace_printk("%s is called\n", __func__);
-
-
 	if (to > inode->i_size) {
 		truncate_pagecache(inode, to, inode->i_size);
 		sfs_truncate_blocks(inode, inode->i_size);
@@ -221,9 +206,6 @@ int sfs_get_block(struct inode *inode, sector_t iblock,
 	sfs_inode = SFS_INODE(inode);
 
 	BUG_ON(iblock > sfs_inode->block_count);
-
-	sfs_trace_printk("iblock=%lu, start_block_number=%llu\n",
-		iblock, sfs_inode->start_block_number);
 
 	clear_buffer_new(bh_result);
 	set_buffer_new(bh_result);
@@ -241,7 +223,6 @@ sfs_write_begin(struct file *file, struct address_space *mapping,
 {
 	int ret;
 	
-	sfs_trace_printk("%s is called\n", __func__);
 	ret = block_write_begin(mapping, pos, len, flags, pagep,
 				sfs_get_block);
 
@@ -257,21 +238,18 @@ static int sfs_write_end(struct file *file, struct address_space *mapping,
 {
 	int ret;
 
-	sfs_trace_printk("%s is called\n", __func__);
 	ret = sfs_generic_write_end(file, mapping, pos, len, copied, page, fsdata);
 	if (ret < len) {
 		BUG_ON(true);
 		sfs_write_failed(mapping, pos + len);
 	}
 
-	sfs_trace_printk("%s is called2\n", __func__);
 	return ret;
 }
 
 ssize_t sfs_sync_read(struct file *filp, char __user *buf,
 			size_t len, loff_t *ppos)
 {
-	sfs_trace_printk("%s is called\n", __func__);
 	return do_sync_read(filp, buf, len, ppos);
 }
 
@@ -279,9 +257,8 @@ ssize_t sfs_sync_write(struct file *filp, const char __user *buf,
 			size_t len, loff_t *ppos)
 {
 	ssize_t ret;
-	sfs_trace_printk("==== %s  is called ====\n", __func__);
 	ret = do_sync_write(filp, buf, len, ppos);
-	sfs_trace_printk("==== THE END ====\n");
+	return ret;
 }
 
 static ssize_t
@@ -290,16 +267,8 @@ sfs_file_write(struct kiocb *iocb, const struct iovec *iov,
 {
 	ssize_t ret;
 
-	//int overwrite = 0;
-	//iocb->private = &overwrite;
 
-	//if (likely(iocb->ki_filp->f_flags & O_DIRECT)) {
-
-	sfs_trace_printk("%s is called\n", __func__);
 	ret = sfs_in_kernel_write(iocb, iov, nr_segs, pos);
-	//} else {
-	//	ret = generic_file_aio_write(iocb, iov, nr_segs, pos);
-	//}
 	return ret;
 }
 
@@ -316,8 +285,6 @@ static int sfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	struct inode *inode = dentry->d_inode;
 	loff_t size;
 
-	printk("sfs_setattr is called\n");
-
 	ret = inode_change_ok(inode, iattr);
 	if (ret)
 		return ret;
@@ -325,10 +292,7 @@ static int sfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	size = i_size_read(inode);
 	if ((iattr->ia_valid & ATTR_SIZE) && iattr->ia_size < size) {
 		i_size_write(inode, iattr->ia_size);
-		printk("inode->i_state=%lx\n", inode->i_state);
 		mark_inode_dirty(inode);
-		printk("inode->i_state=%lx\n", inode->i_state);
-		printk("new size is iattr->ia_size=%d\n", iattr->ia_size);
 	}
 
 	return ret;
@@ -351,9 +315,6 @@ static int
 sfs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int ret = block_write_full_page(page, sfs_get_block, wbc);
-
-	printk("sfs_writepage is called\n");	
-
 	return ret;
 }
 
@@ -362,13 +323,7 @@ sfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
 	int ret;
 
-
-	printk("sfs_writepages is called\n");	
-	printk("inode->i_size=%d\n", mapping->host->i_size);
-
 	ret = mpage_writepages(mapping, wbc, sfs_get_block);
-
-
 	return ret;
 }
 
@@ -376,13 +331,8 @@ static sector_t sfs_bmap(struct address_space *mapping, sector_t block)
 {
 	struct sfs_inode *sfs_inode;
 
-	printk(KERN_ERR "simplefs_bmap is called\n");
 	sfs_inode = SFS_INODE(mapping->host);
-
 	BUG_ON(block > sfs_inode->block_count);
-
-	printk("iblock=%lu, start_block_number=%llu\n",
-		block, sfs_inode->start_block_number);
 
 	return sfs_inode->start_block_number + block;
 }
@@ -412,7 +362,6 @@ static int sfs_mkdir(struct inode *dir, struct dentry *dentry,
 {
 	printk(KERN_ERR "Do not allow to dynamically create new file\n");
 	return -EINVAL;
-	//return sfs_create_fs_object(dir, dentry, S_IFDIR | mode);
 }
 
 static int sfs_create(struct inode *dir, struct dentry *dentry,
@@ -420,7 +369,6 @@ static int sfs_create(struct inode *dir, struct dentry *dentry,
 {
 	printk(KERN_ERR "Do not allow to dynamically create new dir\n");
 	return -EINVAL;
-	//return sfs_create_fs_object(dir, dentry, mode);
 }
 
 const struct file_operations sfs_file_ops = {
@@ -500,9 +448,6 @@ struct dentry *sfs_lookup(struct inode *parent_inode,
 
 	entry = (struct sfs_dir_entry *)bh->b_data;
 	for (i = 0; i < parent->dir_children_count; i++) {
-		printk("Have file: %s (ino=%llu)\n",
-					entry->filename, entry->inode_no);
-
 		if (!strcmp(entry->filename, child_dentry->d_name.name)) {
 			struct inode *inode = sfs_iget(sb, entry->inode_no);
 			inode_init_owner(inode, parent_inode,
@@ -512,19 +457,12 @@ struct dentry *sfs_lookup(struct inode *parent_inode,
 		}
 		entry++;		
 	}
-
-	printk(KERN_ERR "No inode found for the file name [%s]\n",
-		child_dentry->d_name.name);
 	return NULL;
 }
 
 void sfs_destroy_inode(struct inode *inode)
 {
 	struct sfs_inode *sfs_inode = SFS_INODE(inode);
-	
-	printk(KERN_INFO "Freeing private data of inode %p (%lu)\n",
-		sfs_inode, inode->i_ino);
-
 	kmem_cache_free(sfs_inode_cachep, sfs_inode);
 }
 
@@ -538,30 +476,11 @@ static void sfs_put_super(struct super_block *sb)
 
 int sfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 {	
-	printk("sfs_write_inode is called\n");
 	return 0;
 }
 
 static int sfs_sync_fs(struct super_block *sb, int wait)
 {
-	printk("sfs_sync_fs is called\n");
-	return 0;
-}
-
-static int sfs_sb_load_journal(struct super_block *sb, struct inode *inode)
-{
-	struct journal_s *journal;
-	struct sfs_super_block *sfs_sb = SFS_SB(sb);
-	
-	journal = jbd2_journal_init_inode(inode);
-	if (!journal) {
-		printk(KERN_ERR "Cannot load journal\n");
-		return 1;
-	}
-
-	journal->j_private = sb;
-	sfs_sb->journal = journal;
-
 	return 0;
 }
 
@@ -629,26 +548,6 @@ int sfs_fill_super(struct super_block *sb, void *data, int silent)
 	
 	ret = 0;
 
-
-	#if 0
-	if (!(sb_disk->journal)) {
-		struct inode *journal_inode;
-		journal_inode = sfs_iget(sb, SFS_JOURNAL_INODE_NUMBER);
-		#if 0
-		ret = sfs_sb_load_journal(sb, journal_inode);
-		#endif
-	}
-
-
-	/* FIXME: disable this first */
-	if (sb_disk->journal) {
-		ret = jbd2_journal_load(sb_disk->journal);
-	}
-
-	printk("j_maxlen=%u\n", sb_disk->journal->j_maxlen);
-	printk("j_max_transaction_buffers=%u\n",
-				sb_disk->journal->j_max_transaction_buffers);
-	#endif
 release:
 	brelse(bh);
 	return ret;
@@ -726,5 +625,4 @@ static void sfs_exit(void)
 
 module_init(sfs_init);
 module_exit(sfs_exit);
-
 MODULE_LICENSE("GPL");
